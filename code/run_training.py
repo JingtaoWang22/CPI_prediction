@@ -65,8 +65,8 @@ class CompoundProteinInteractionPrediction(nn.Module):
 
         """Concatenate the above two vectors and output the interaction."""
         cat_vector = torch.cat((compound_vector, protein_vector), 1)
-        for j in range(layer_output):
-            cat_vector = torch.relu(self.W_out[j](cat_vector))
+        #for j in range(layer_output):
+        #    cat_vector = torch.relu(self.W_out[j](cat_vector))
         interaction = self.W_interaction(cat_vector)
 
         return interaction
@@ -156,7 +156,7 @@ def split_dataset(dataset, ratio):
 if __name__ == "__main__":
 
     """Hyperparameters."""
-    (DATASET, radius, ngram, dim, layer_gnn, window, layer_cnn, layer_output,
+    (DATASET,dataname, radius, ngram, dim, layer_gnn, window, layer_cnn, layer_output,
      lr, lr_decay, decay_interval, weight_decay, iteration,
      setting) = sys.argv[1:]
     (dim, layer_gnn, window, layer_cnn, layer_output, decay_interval,
@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
     """Load preprocessed data."""
     dir_input = ('../dataset/' + DATASET + '/input/'
-                 'radius' + radius + '_ngram' + ngram + '/')
+                 'radius' + radius + '_ngram' + ngram + ' '+dataname+'/')
     compounds = load_tensor(dir_input + 'compounds', torch.LongTensor)
     adjacencies = load_tensor(dir_input + 'adjacencies', torch.FloatTensor)
     proteins = load_tensor(dir_input + 'proteins', torch.LongTensor)
@@ -197,8 +197,8 @@ if __name__ == "__main__":
     tester = Tester(model)
 
     """Output files."""
-    file_AUCs = '../output/result/AUCs--' + setting + '.txt'
-    file_model = '../output/model/' + setting
+    file_AUCs = '../output/result/AUCs--' +dataname +" "+setting + '.txt'
+    file_model = '../output/model/' +dataname+" " +setting
     AUCs = ('Epoch\tTime(sec)\tLoss_train\tAUC_dev\t'
             'AUC_test\tPrecision_test\tRecall_test')
     with open(file_AUCs, 'w') as f:

@@ -1,8 +1,9 @@
 #!/bin/bash
 
 DATASET=human
-# DATASET=celegans
+#DATASET=celegans
 # DATASET=yourdata
+
 
 # radius=1
 radius=2
@@ -23,5 +24,10 @@ decay_interval=10
 weight_decay=1e-6
 iteration=100
 
+
+
+dataname=H_1:1
+
 setting=$DATASET--radius$radius--ngram$ngram--dim$dim--layer_gnn$layer_gnn--window$window--layer_cnn$layer_cnn--layer_output$layer_output--lr$lr--lr_decay$lr_decay--decay_interval$decay_interval--weight_decay$weight_decay--iteration$iteration
-python run_training.py $DATASET $radius $ngram $dim $layer_gnn $window $layer_cnn $layer_output $lr $lr_decay $decay_interval $weight_decay $iteration $setting
+
+python run_training.py $DATASET $dataname $radius $ngram $dim $layer_gnn $window $layer_cnn $layer_output $lr $lr_decay $decay_interval $weight_decay $iteration $setting
