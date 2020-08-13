@@ -1,4 +1,4 @@
-#!/bin/bash
+!/bin/bash
 
 DATASET=human
 #DATASET=celegans
@@ -26,7 +26,8 @@ iteration=100
 
 
 
-dataname=H_1:1
+#dataname=H_1:1
+dataname=""
 
 setting=$DATASET--radius$radius--ngram$ngram--dim$dim--layer_gnn$layer_gnn--window$window--layer_cnn$layer_cnn--layer_output$layer_output--lr$lr--lr_decay$lr_decay--decay_interval$decay_interval--weight_decay$weight_decay--iteration$iteration
 

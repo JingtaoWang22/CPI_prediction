@@ -7,6 +7,8 @@ Created on Wed Aug  5 17:28:29 2020
 """
 
 
+### model 1 self attention -> attn_cnn
+
 import pickle
 import sys
 import timeit
@@ -46,6 +48,26 @@ class CompoundProteinInteractionPrediction(nn.Module):
         self.W_gnn = nn.ModuleList([nn.Linear(self.dim_gnn, self.dim_gnn)
                                     for _ in range(layer_gnn)])
         
+        # cnn:
+        self.W_cnn = nn.ModuleList([nn.Conv2d(
+                     in_channels=1, out_channels=1, kernel_size=2*11+1,
+                     stride=1, padding=11) for _ in range(3)])
+        ## multi channel
+        '''
+        self.W_cnn = nn.ModuleList([
+            nn.Conv2d(in_channels=1, out_channels=2, 
+                      kernel_size=2*window+1,
+                     stride=1, padding=window),
+            nn.Conv2d(in_channels=2, out_channels=2, 
+                      kernel_size=2*window+1,
+                     stride=1, padding=window),
+            nn.Conv2d(in_channels=2, out_channels=1, 
+                      kernel_size=2*window+1,
+                     stride=1, padding=window),
+            ])
+        '''
+        
+        
         # transformer:
         self.embed_word = nn.Embedding(n_word, self.dim)
         self.positional_encoder=positional_encoder(self.dim,self.dropout)
@@ -66,11 +88,31 @@ class CompoundProteinInteractionPrediction(nn.Module):
             xs = xs + torch.matmul(A, hs)
         # return torch.unsqueeze(torch.sum(xs, 0), 0)
         return torch.unsqueeze(torch.mean(xs, 0), 0)
+    
+    def attention_cnn(self, x, xs, layer):
+        """The attention mechanism is applied to the last layer of CNN."""
 
+        xs = torch.unsqueeze(torch.unsqueeze(xs, 0), 0)
+        for i in range(layer):
+            xs = torch.relu(self.W_cnn[i](xs))
+        xs = torch.squeeze(torch.squeeze(xs, 0), 0)
+
+        h = torch.relu(self.W_attention(x))
+        hs = torch.relu(self.W_attention(xs))
+        weights = torch.tanh(F.linear(h, hs))
+        ys = torch.t(weights) * hs
+
+        # return torch.unsqueeze(torch.sum(ys, 0), 0)
+        return torch.unsqueeze(torch.mean(ys, 0), 0)
+        #return xs
     def transformer(self, compound, protein, n_encoder, n_decoder, heads):
         protein=self.positional_encoder(protein)
-        protein=self.encoder(protein)
-        protein=self.decoder(protein, compound)
+        
+        if (n_encoder!=0):
+            protein=self.encoder(protein)
+        protein = self.attention_cnn(protein,protein,3)
+        #if (n_decoder!=0):
+        #    protein=self.decoder(protein, compound)
         
         return protein
         
@@ -85,6 +127,7 @@ class CompoundProteinInteractionPrediction(nn.Module):
         """Protein vector with transformer."""
         
         word_vectors = self.embed_word(words)
+        
         protein_vector = self.transformer(compound_vector,
                         word_vectors,self.n_encoder,self.n_decoder,self.heads)
 
@@ -168,6 +211,7 @@ class self_attn(nn.Module):
     def __init__(self, h, dim, dropout=0):
         super(self_attn, self).__init__()
         assert dim % h == 0
+        # We assume d_v always equals d_k
         self.d_k = dim // h
         self.h = h
         self.linears = clones(nn.Linear(dim, dim), 3)
@@ -404,6 +448,9 @@ if __name__ == "__main__":
     (DATASET,dataname, radius, ngram, dim, d_ff, layer_gnn, layer_output,heads, n_encoder,n_decoder,
      lr, lr_decay, decay_interval, weight_decay, iteration, warmup_step,
      dropout,setting) = sys.argv[1:]
+    #('human','','2','3','10','10','3','1','2','2','1','1e-4','0.5','10',
+    #                     '1e-6','100','20','0.1','qwe')
+    
     
     (dim, d_ff, layer_gnn, layer_output, decay_interval,
      iteration,heads, n_encoder,n_decoder,warmup_step) = map(int, [dim, d_ff, layer_gnn, layer_output,

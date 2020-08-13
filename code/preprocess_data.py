@@ -86,10 +86,11 @@ def dump_dictionary(dictionary, filename):
 
 if __name__ == "__main__":
 
-    DATASET,dataname, radius, ngram = sys.argv[1:]
+    DATASET,dataname, radius, ngram = ('human','','2','3')
+    #sys.argv[1:]
     radius, ngram = map(int, [radius, ngram])
 
-    with open('../dataset/' + DATASET + '/original/'+dataname+'.txt', 'r') as f:
+    with open('../dataset/' + DATASET + '/original/data.txt', 'r') as f:
         data_list = f.read().strip().split('\n')
 
     """Exclude data contains '.' in the SMILES format."""

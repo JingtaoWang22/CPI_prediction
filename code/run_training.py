@@ -19,9 +19,24 @@ class CompoundProteinInteractionPrediction(nn.Module):
         self.embed_word = nn.Embedding(n_word, dim)
         self.W_gnn = nn.ModuleList([nn.Linear(dim, dim)
                                     for _ in range(layer_gnn)])
+        
         self.W_cnn = nn.ModuleList([nn.Conv2d(
                      in_channels=1, out_channels=1, kernel_size=2*window+1,
                      stride=1, padding=window) for _ in range(layer_cnn)])
+        
+        '''
+        self.W_cnn = nn.ModuleList([
+            nn.Conv2d(in_channels=1, out_channels=2, 
+                      kernel_size=2*window+1,
+                     stride=1, padding=window),
+            nn.Conv2d(in_channels=2, out_channels=2, 
+                      kernel_size=2*window+1,
+                     stride=1, padding=window),
+            nn.Conv2d(in_channels=2, out_channels=1, 
+                      kernel_size=2*window+1,
+                     stride=1, padding=window),
+            ])
+        '''
         self.W_attention = nn.Linear(dim, dim)
         self.W_out = nn.ModuleList([nn.Linear(2*dim, 2*dim)
                                     for _ in range(layer_output)])
@@ -158,7 +173,8 @@ if __name__ == "__main__":
     """Hyperparameters."""
     (DATASET,dataname, radius, ngram, dim, layer_gnn, window, layer_cnn, layer_output,
      lr, lr_decay, decay_interval, weight_decay, iteration,
-     setting) = sys.argv[1:]
+     setting) = ('human',"",'2','3','10','3','11','3','1','1e-3','0.5','10','1e-6','100',"arti")
+    #sys.argv[1:]
     (dim, layer_gnn, window, layer_cnn, layer_output, decay_interval,
      iteration) = map(int, [dim, layer_gnn, window, layer_cnn, layer_output,
                             decay_interval, iteration])
@@ -174,7 +190,7 @@ if __name__ == "__main__":
 
     """Load preprocessed data."""
     dir_input = ('../dataset/' + DATASET + '/input/'
-                 'radius' + radius + '_ngram' + ngram + ' '+dataname+'/')
+                 'radius' + radius + '_ngram' + ngram +' /')
     compounds = load_tensor(dir_input + 'compounds', torch.LongTensor)
     adjacencies = load_tensor(dir_input + 'adjacencies', torch.FloatTensor)
     proteins = load_tensor(dir_input + 'proteins', torch.LongTensor)
