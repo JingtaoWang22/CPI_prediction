@@ -52,6 +52,9 @@ class CompoundProteinInteractionPrediction(nn.Module):
         self.W_cnn = nn.ModuleList([nn.Conv2d(
                      in_channels=1, out_channels=1, kernel_size=2*11+1,
                      stride=1, padding=11) for _ in range(3)])
+        self.W_attention = nn.Linear(self.dim, self.dim)
+        
+        
         ## multi channel
         '''
         self.W_cnn = nn.ModuleList([
@@ -110,7 +113,7 @@ class CompoundProteinInteractionPrediction(nn.Module):
         
         if (n_encoder!=0):
             protein=self.encoder(protein)
-        protein = self.attention_cnn(protein,protein,3)
+        
         #if (n_decoder!=0):
         #    protein=self.decoder(protein, compound)
         
@@ -130,7 +133,10 @@ class CompoundProteinInteractionPrediction(nn.Module):
         
         protein_vector = self.transformer(compound_vector,
                         word_vectors,self.n_encoder,self.n_decoder,self.heads)
-
+        
+        # attention CNN
+        protein_vector = self.attention_cnn(compound_vector,protein_vector,3)
+        
         """Concatenate the above two vectors and output the interaction."""
         cat_vector = torch.cat((compound_vector, protein_vector), 1)
         #for j in range(layer_output):
@@ -450,6 +456,8 @@ if __name__ == "__main__":
      dropout,setting) = sys.argv[1:]
     #('human','','2','3','10','10','3','1','2','2','1','1e-4','0.5','10',
     #                     '1e-6','100','20','0.1','qwe')
+    #sys.argv[1:]
+    
     
     
     (dim, d_ff, layer_gnn, layer_output, decay_interval,
@@ -469,7 +477,7 @@ if __name__ == "__main__":
 
     """Load preprocessed data."""
     dir_input = ('../dataset/' + DATASET + '/input/'
-                 'radius' + radius + '_ngram' + ngram + ' '+dataname+'/')
+                 'radius' + radius + '_ngram' + ngram +dataname+'/')
     compounds = load_tensor(dir_input + 'compounds', torch.LongTensor)
     adjacencies = load_tensor(dir_input + 'adjacencies', torch.FloatTensor)
     proteins = load_tensor(dir_input + 'proteins', torch.LongTensor)
