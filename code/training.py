@@ -403,15 +403,27 @@ if __name__ == "__main__":
     """Hyperparameters."""
     (DATASET,dataname, radius, ngram, dim, d_ff, layer_gnn, layer_output,heads, n_encoder,n_decoder,
      lr, lr_decay, decay_interval, weight_decay, iteration, warmup_step,
-     dropout,setting) = sys.argv[1:]
+     dropout) =('human','','2','3','10','10','3','1','2','2','1','1e-4','0.5','10',
+                        '1e-6','100','20','0.1')
+    #sys.argv[1:]
     
     (dim, d_ff, layer_gnn, layer_output, decay_interval,
      iteration,heads, n_encoder,n_decoder,warmup_step) = map(int, [dim, d_ff, layer_gnn, layer_output,
                             decay_interval, iteration,heads, n_encoder,n_decoder,warmup_step])
-                            
-              
+                
+    setting=[]                                                              
+    setting.append(' '.join(['DATASET: '+DATASET,'\ndataname: '+dataname]))
+    setting.append(' '.join(['\nHyperparameters:\nlr: '+lr, '\nlr_decay: '+lr_decay, '\ndecay_interval: '+str(decay_interval),
+                       '\nweight_decay: '+weight_decay, '\niteration: '+str(iteration)]))
+    setting.append(' '.join(['\nData & GNN:\nradius: '+str(radius), '\nngram: '+str(ngram), '\nlayer_gnn: '+str(layer_gnn),
+                       '\nlayer_output: '+str(layer_output)]))
+                       
+    setting.append(' '.join(['\nTransformer:\nn_encoder: '+str(n_encoder),'\nn_decoder: '+str(n_decoder),'\nheads: '+str(heads), 
+                      '\ndim: '+str(dim), '\nd_ff: '+str(d_ff), '\nwarmup_step: '+str(warmup_step),
+                      '\ndropout: '+dropout+'\n']))
+                                                                   
     lr, lr_decay, weight_decay,dropout = map(float, [lr, lr_decay, weight_decay,dropout])
-
+    
     """CPU or GPU."""
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -422,7 +434,7 @@ if __name__ == "__main__":
 
     """Load preprocessed data."""
     dir_input = ('../dataset/' + DATASET + '/input/'
-                 'radius' + radius + '_ngram' + ngram + ' '+dataname+'/')
+                 'radius' + radius + '_ngram' + ngram + dataname+'/')
     compounds = load_tensor(dir_input + 'compounds', torch.LongTensor)
     adjacencies = load_tensor(dir_input + 'adjacencies', torch.FloatTensor)
     proteins = load_tensor(dir_input + 'proteins', torch.LongTensor)
@@ -445,12 +457,22 @@ if __name__ == "__main__":
     tester = Tester(model)
 
     """Output files."""
-    file_AUCs = '../output/result/AUCs--' +dataname +" "+setting + '.txt'
-    file_model = '../output/model/' +dataname+" " +setting
+    
+    file_AUCs =( '../output/result/Trans,'+DATASET+','+dataname + str(ngram)+'gram'
+    +',Enc_'+str(n_encoder)+",Dec_"+str(n_decoder)+',F_'+str(d_ff)+',GNN_'+str(layer_gnn)
+    +'.txt')
+    
+    file_model = ('../output/model/Transformer,'+DATASET+','+dataname+',Enc_'
+    +str(n_encoder)+",Dec_"+str(n_decoder))
+    
     AUCs = ('Epoch\tTime(sec)\tLoss_train\tAUC_dev\t'
             'AUC_test\tPrecision_test\tRecall_test')
     with open(file_AUCs, 'w') as f:
+        #f.write('Settings:\n')
+        for i in range(len(setting)):
+            f.write(setting[i] + '\n')
         f.write(AUCs + '\n')
+        
 
     """Start training."""
     print('Training...')
