@@ -23,6 +23,53 @@ import copy
 import math
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
 from torch.autograd import Variable
+#from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold
+from math import sqrt
+from scipy import stats
+from sklearn import preprocessing,metrics
+
+
+
+
+### metrics
+def rmse(y,f):
+    """
+    Task:    To compute root mean squared error (RMSE)
+    Input:   y      Vector with original labels (pKd [M])
+             f      Vector with predicted labels (pKd [M])
+    Output:  rmse   RSME
+    """
+    rmse = sqrt(((y - f)**2).mean(axis=0))
+    return rmse
+
+def pearson(y,f):
+    """
+    Task:    To compute Pearson correlation coefficient
+    Input:   y      Vector with original labels (pKd [M])
+             f      Vector with predicted labels (pKd [M])
+    Output:  rp     Pearson correlation coefficient
+    """
+    rp = np.corrcoef(y, f)[0,1]
+    return rp
+
+def spearman(y,f):
+    """
+    Task:    To compute Spearman's rank correlation coefficient
+    Input:   y      Vector with original labels (pKd [M])
+             f      Vector with predicted labels (pKd [M])
+    Output:  rs     Spearman's rank correlation coefficient
+    """
+    rs = stats.spearmanr(y, f)[0]
+    return rs
+
+def reg_scores(label, pred):
+	label = label.reshape(-1)
+	pred = pred.reshape(-1)
+	return rmse(label, pred), pearson(label, pred), spearman(label, pred)
+### end of metrics
+
+
 
 
 
@@ -81,8 +128,9 @@ class CompoundProteinInteractionPrediction(nn.Module):
         # interaction:
         self.W_out = nn.ModuleList([nn.Linear(self.dim_gnn+self.dim, self.dim_gnn+self.dim)
                                     for _ in range(layer_output)])
-        self.W_interaction = nn.Linear(self.dim_gnn+self.dim, 2)
+        self.W_interaction = nn.Linear(self.dim_gnn+self.dim, 1)
         
+        self.mse=nn.MSELoss()
         
 
     def gnn(self, xs, A, layer):
@@ -122,7 +170,7 @@ class CompoundProteinInteractionPrediction(nn.Module):
     def forward(self, inputs):
 
         fingerprints, adjacency, words = inputs
-
+        
         """Compound vector with GNN."""
         fingerprint_vectors = self.embed_fingerprint(fingerprints)
         compound_vector = self.gnn(fingerprint_vectors, adjacency, layer_gnn)
@@ -147,17 +195,24 @@ class CompoundProteinInteractionPrediction(nn.Module):
 
     def __call__(self, data, train=True):
         inputs, correct_interaction = data[:-1], data[-1]
-        predicted_interaction = self.forward(inputs)
+        predicted_interaction = self.forward(inputs)#.double()
 
         if train:
-            loss = F.cross_entropy(predicted_interaction, correct_interaction)
+            correct_interaction=correct_interaction.reshape(1,1)
+            #print('5',type(predicted_interaction.item()))
+            #print('4',type(correct_interaction.item()))
+            loss = self.mse(predicted_interaction, correct_interaction.to(device))
+            loss=loss#.double()
+            #print('3',type(loss.item()))
+            #loss = F.cross_entropy(predicted_interaction, correct_interaction)
             return loss
         else:
-            correct_labels = correct_interaction.to('cpu').data.numpy()
-            ys = F.softmax(predicted_interaction, 1).to('cpu').data.numpy()
-            predicted_labels = list(map(lambda x: np.argmax(x), ys))
-            predicted_scores = list(map(lambda x: x[1], ys))
-            return correct_labels, predicted_labels, predicted_scores
+           # correct_labels = correct_interaction.to('cpu').data.numpy()
+           # ys = F.softmax(predicted_interaction, 1).to('cpu').data.numpy()
+           # predicted_labels = list(map(lambda x: np.argmax(x), ys))
+           # predicted_scores = list(map(lambda x: x[1], ys))
+            #rmse_value, pearson_value, spearman_value = reg_scores(correct_interaction, predicted_interaction)
+            return correct_interaction, predicted_interaction
 
 # end of the model
 
@@ -382,19 +437,31 @@ class PositionwiseFeedForward(nn.Module):
 ### end of transformer
 
 
+
+
+
+
+
+
+
+
 class Trainer(object):
     def __init__(self, model):
         self.model = model
         self.optimizer = optim.Adam(self.model.parameters(),
                                     lr=1e-7, weight_decay=weight_decay) ##start with warm up rate
 
-    def train(self, dataset):
+    def train(self, datase):
         np.random.shuffle(dataset)
         N = len(dataset)
         loss_total = 0
         for data in dataset:
             loss = self.model(data)
+            #print('2',type(loss.item()))
+            #loss.float()
             self.optimizer.zero_grad()
+            #loss.float()
+            #print('1',type(loss.item()))
             loss.backward()
             self.optimizer.step()
             loss_total += loss.to('cpu').data.numpy()
@@ -409,15 +476,15 @@ class Tester(object):
         N = len(dataset)
         T, Y, S = [], [], []
         for data in dataset:
-            (correct_labels, predicted_labels,
-             predicted_scores) = self.model(data, train=False)
+            (correct_labels, predicted_labels) = self.model(data, train=False)
             T.append(correct_labels)
             Y.append(predicted_labels)
-            S.append(predicted_scores)
+            #S.append(spearman_value)
         AUC = roc_auc_score(T, S)
-        precision = precision_score(T, Y)
-        recall = recall_score(T, Y)
-        return AUC, precision, recall
+        #precision = precision_score(T, Y)
+        #recall = recall_score(T, Y)
+        rmse_value, pearson_value, spearman_value = reg_scores(T, Y)
+        return rmse_value, pearson_value, spearman_value,AUC
 
     def save_AUCs(self, AUCs, filename):
         with open(filename, 'a') as f:
@@ -425,6 +492,171 @@ class Tester(object):
 
     def save_model(self, model, filename):
         torch.save(model.state_dict(), filename)
+
+
+
+
+
+
+
+def split_train_test_clusters(measure, clu_thre, n_fold):
+	# load cluster dict
+	cluster_path = '../dataset/preprocessing/'
+	with open(cluster_path+measure+'_compound_cluster_dict_'+str(clu_thre), 'rb') as f:
+		C_cluster_dict = pickle.load(f)
+	with open(cluster_path+measure+'_protein_cluster_dict_'+str(clu_thre), 'rb') as f:
+		P_cluster_dict = pickle.load(f)
+	
+	C_cluster_set = set(list(C_cluster_dict.values()))
+	P_cluster_set = set(list(P_cluster_dict.values()))
+	C_cluster_list = np.array(list(C_cluster_set))
+	P_cluster_list = np.array(list(P_cluster_set))
+	np.random.shuffle(C_cluster_list)
+	np.random.shuffle(P_cluster_list)
+ 
+    
+	# n-fold split
+	#c_kf = KFold(len(C_cluster_list), n_fold, shuffle=True)
+	#p_kf = KFold(len(P_cluster_list), n_fold, shuffle=True)
+	c_kf = KFold(n_fold,shuffle=True)
+    
+	p_kf = KFold(n_fold,shuffle=True)
+	c_train_clusters, c_test_clusters = [], []
+	for train_idx, test_idx in c_kf.split(C_cluster_list):
+		c_train_clusters.append(C_cluster_list[train_idx])
+		c_test_clusters.append(C_cluster_list[test_idx])
+	p_train_clusters, p_test_clusters = [], []
+	for train_idx, test_idx in p_kf.split(P_cluster_list):
+		p_train_clusters.append(P_cluster_list[train_idx])
+		p_test_clusters.append(P_cluster_list[test_idx])
+	
+	
+	pair_kf = KFold(n_fold,shuffle=True)
+	pair_list = []
+	for i_c in C_cluster_list:
+		for i_p in P_cluster_list:
+			pair_list.append('c'+str(i_c)+'p'+str(i_p))
+	pair_list = np.array(pair_list)
+	np.random.shuffle(pair_list)
+	#pair_kf = KFold(len(pair_list), n_fold, shuffle=True)
+	pair_train_clusters, pair_test_clusters = [], []
+	for train_idx, test_idx in pair_kf.split(pair_list):
+		pair_train_clusters.append(pair_list[train_idx])
+		pair_test_clusters.append(pair_list[test_idx])
+	
+	return pair_train_clusters, pair_test_clusters, c_train_clusters,\
+        c_test_clusters, p_train_clusters, p_test_clusters, C_cluster_dict, P_cluster_dict
+
+
+def load_data(measure, setting, clu_thre, n_fold):
+	# load data
+	with open('../dataset/preprocessing/pdbbind_all_combined_input_'+measure,'rb') as f:
+		data_pack = pickle.load(f)
+	cid_list = data_pack[9]
+	pid_list = data_pack[10]
+	n_sample = len(cid_list)
+	
+	# train-test split
+	train_idx_list, valid_idx_list, test_idx_list = [], [], []
+	print('setting: ',setting)
+	if setting == 'imputation':
+		pair_train_clusters, pair_test_clusters, c_train_clusters, c_test_clusters,\
+            p_train_clusters, p_test_clusters, C_cluster_dict, P_cluster_dict \
+		= split_train_test_clusters(measure, clu_thre, n_fold)
+		for fold in range(n_fold):
+			pair_train_valid, pair_test = pair_train_clusters[fold], pair_test_clusters[fold]
+			pair_valid = np.random.choice(pair_train_valid, int(len(pair_train_valid)*0.125), replace=False)
+			pair_train = set(pair_train_valid)-set(pair_valid)
+			pair_valid = set(pair_valid)
+			pair_test = set(pair_test)
+			train_idx, valid_idx, test_idx = [], [], []
+			for ele in range(n_sample):
+				if 'c'+str(C_cluster_dict[cid_list[ele]])+'p'+str(P_cluster_dict[pid_list[ele]]) in pair_train:
+					train_idx.append(ele)
+				elif 'c'+str(C_cluster_dict[cid_list[ele]])+'p'+str(P_cluster_dict[pid_list[ele]]) in pair_valid:
+					valid_idx.append(ele)
+				elif 'c'+str(C_cluster_dict[cid_list[ele]])+'p'+str(P_cluster_dict[pid_list[ele]]) in pair_test:
+					test_idx.append(ele)
+				else:
+					print('error')
+			train_idx_list.append(train_idx)
+			valid_idx_list.append(valid_idx)
+			test_idx_list.append(test_idx)
+			print('fold '+ fold+ 'train '+len(train_idx)+'test ',len(test_idx),'valid ',len(valid_idx))
+			
+	elif setting == 'new_protein':
+		pair_train_clusters, pair_test_clusters, c_train_clusters, c_test_clusters, p_train_clusters, p_test_clusters, C_cluster_dict, P_cluster_dict \
+		= split_train_test_clusters(measure, clu_thre, n_fold)
+		for fold in range(n_fold):
+			p_train_valid, p_test = p_train_clusters[fold], p_test_clusters[fold]
+			p_valid = np.random.choice(p_train_valid, int(len(p_train_valid)*0.125), replace=False)
+			p_train = set(p_train_valid)-set(p_valid)
+			train_idx, valid_idx, test_idx = [], [], []
+			for ele in range(n_sample): 
+				if P_cluster_dict[pid_list[ele]] in p_train:
+					train_idx.append(ele)
+				elif P_cluster_dict[pid_list[ele]] in p_valid:
+					valid_idx.append(ele)
+				elif P_cluster_dict[pid_list[ele]] in p_test:
+					test_idx.append(ele)
+				else:
+					print('error')
+			train_idx_list.append(train_idx)
+			valid_idx_list.append(valid_idx)
+			test_idx_list.append(test_idx)
+			print ('fold', fold, 'train ',len(train_idx),'test ',len(test_idx),'valid ',len(valid_idx))
+			
+	elif setting == 'new_compound':
+		pair_train_clusters, pair_test_clusters, c_train_clusters, c_test_clusters, p_train_clusters, p_test_clusters, C_cluster_dict, P_cluster_dict \
+		= split_train_test_clusters(measure, clu_thre, n_fold)
+		for fold in range(n_fold):
+			c_train_valid, c_test = c_train_clusters[fold], c_test_clusters[fold]
+			c_valid = np.random.choice(c_train_valid, int(len(c_train_valid)*0.125), replace=False)
+			c_train = set(c_train_valid)-set(c_valid)
+			train_idx, valid_idx, test_idx = [], [], []
+			for ele in range(n_sample):
+				if C_cluster_dict[cid_list[ele]] in c_train:
+					train_idx.append(ele)
+				elif C_cluster_dict[cid_list[ele]] in c_valid:
+					valid_idx.append(ele)
+				elif C_cluster_dict[cid_list[ele]] in c_test:
+					test_idx.append(ele)
+				else:
+					print('error')
+			train_idx_list.append(train_idx)
+			valid_idx_list.append(valid_idx)
+			test_idx_list.append(test_idx)
+			print ('fold', fold, 'train ',len(train_idx),'test ',len(test_idx),'valid ',len(valid_idx))
+	
+	elif setting == 'new_new':
+		assert n_fold ** 0.5 == int(n_fold ** 0.5)
+		pair_train_clusters, pair_test_clusters, c_train_clusters, c_test_clusters, p_train_clusters, p_test_clusters, C_cluster_dict, P_cluster_dict \
+		= split_train_test_clusters(measure, clu_thre, int(n_fold ** 0.5))
+		
+		for fold_x in range(int(n_fold ** 0.5)):
+			for fold_y in range(int(n_fold ** 0.5)):
+				c_train_valid, p_train_valid = c_train_clusters[fold_x], p_train_clusters[fold_y]
+				c_test, p_test = c_test_clusters[fold_x], p_test_clusters[fold_y]
+				c_valid = np.random.choice(list(c_train_valid), int(len(c_train_valid)/3), replace=False)
+				c_train = set(c_train_valid)-set(c_valid)
+				p_valid = np.random.choice(list(p_train_valid), int(len(p_train_valid)/3), replace=False)
+				p_train = set(p_train_valid)-set(p_valid)
+				
+				train_idx, valid_idx, test_idx = [], [], []
+				for ele in range(n_sample):
+					if C_cluster_dict[cid_list[ele]] in c_train and P_cluster_dict[pid_list[ele]] in p_train:
+						train_idx.append(ele)
+					elif C_cluster_dict[cid_list[ele]] in c_valid and P_cluster_dict[pid_list[ele]] in p_valid:
+						valid_idx.append(ele)
+					elif C_cluster_dict[cid_list[ele]] in c_test and P_cluster_dict[pid_list[ele]] in p_test:
+						test_idx.append(ele)
+				train_idx_list.append(train_idx)
+				valid_idx_list.append(valid_idx)
+				test_idx_list.append(test_idx)
+				print ('fold', fold_x*int(n_fold ** 0.5)+fold_y, 'train ',
+           len(train_idx),'test ',len(test_idx),'valid ',len(valid_idx))
+	return data_pack, train_idx_list, valid_idx_list, test_idx_list
+
 
 
 def load_tensor(file_name, dtype):
@@ -447,6 +679,12 @@ def split_dataset(dataset, ratio):
     dataset_1, dataset_2 = dataset[:n], dataset[n:]
     return dataset_1, dataset_2
 
+def datalist(data,l):
+    d=[]
+    for i in l:
+        #d.append([data[0][i],data[1][i],data[2][i],data[3][i]])
+        d.append(data[i])
+    return d
 
 if __name__ == "__main__":
 
@@ -480,25 +718,58 @@ if __name__ == "__main__":
     compounds = load_tensor(dir_input + 'compounds', torch.LongTensor)
     adjacencies = load_tensor(dir_input + 'adjacencies', torch.FloatTensor)
     proteins = load_tensor(dir_input + 'proteins', torch.LongTensor)
-    interactions = load_tensor(dir_input + 'interactions', torch.FloatTensor)  ## longtensor for tsubaki, float for monn
+    #interactions = load_tensor(dir_input + 'interactions', torch.FloatTensor)  ## longtensor for tsubaki, float for monn
+    interactions = torch.from_numpy(np.load(dir_input + 'interactions.npy'))
     fingerprint_dict = load_pickle(dir_input + 'fingerprint_dict.pickle')
     word_dict = load_pickle(dir_input + 'word_dict.pickle')
     n_fingerprint = len(fingerprint_dict)
     n_word = len(word_dict)
 
     """Create a dataset and split it into train/dev/test."""
-    dataset = list(zip(compounds, adjacencies, proteins, interactions))
-    dataset = shuffle_dataset(dataset, 1234)
-    dataset_train, dataset_ = split_dataset(dataset, 0.8)
-    dataset_dev, dataset_test = split_dataset(dataset_, 0.5)
-
+    #dataset = list(zip(compounds, adjacencies, proteins, interactions))
+    
     """Set a model."""
     torch.manual_seed(1234)
     model = CompoundProteinInteractionPrediction().to(device)
     trainer = Trainer(model)
     tester = Tester(model)
+    
 
-    """Output files."""
+ 	#evaluate scheme
+    measure = 'KIKD'  # IC50 or KIKD
+    setting = 'new_compound'  # new_compound, new_protein or new_new
+    clu_thre = 0.3  # 0.3, 0.4, 0.5 or 0.6
+    n_epoch = 30
+    n_rep = 1#10
+	
+    assert setting in ['new_compound', 'new_protein', 'new_new']
+    assert clu_thre in [0.3, 0.4, 0.5, 0.6]
+    assert measure in ['IC50', 'KIKD']
+    GNN_depth, inner_CNN_depth, DMA_depth = 4, 2, 2
+    if setting == 'new_compound':
+        n_fold = 5
+        batch_size = 32
+        k_head, kernel_size, hidden_size1, hidden_size2 = 2, 7, 128, 128
+    elif setting == 'new_protein':
+        n_fold = 5
+        batch_size = 32
+        ead, kernel_size, hidden_size1, hidden_size2 = 1, 5, 128, 128
+    elif setting == 'new_new':
+        n_fold = 9
+        batch_size = 32
+        #k_head, kernel_size, hidden_size1, hidden_size2 = 1, 7, 128, 128
+    para_names = ['GNN_depth', 'inner_CNN_depth', 'DMA_depth', 'k_head', 'kernel_size', 'hidden_size1', 'hidden_size2']
+	
+	#params = [GNN_depth, inner_CNN_depth, DMA_depth, k_head, kernel_size, hidden_size1, hidden_size2]
+	#params = sys.argv[4].split(',')
+	#params = map(int, params)
+	
+	#print evaluation scheme
+    print('Dataset: PDBbind v2018 with measurement', measure)
+    print('Clustering threshold:', clu_thre)
+    print('Number of epochs:', n_epoch)
+    print('Number of repeats:', n_rep)
+    #print('Hyper-parameters:', [para_names[i]+':'+str(params[i]) for i in range(7)])
     file_AUCs = '../output/result/AUCs--' +dataname +" "+setting + '.txt'
     file_model = '../output/model/' +dataname+" " +setting
     AUCs = ('Epoch\tTime(sec)\tLoss_train\tAUC_dev\t'
@@ -509,14 +780,89 @@ if __name__ == "__main__":
     """Start training."""
     print('Training...')
     print(AUCs)
-    start = timeit.default_timer()
+    rep_all_list = []
+    rep_avg_list = []
+    for a_rep in range(n_rep):
+        #load data
+        data_pack, train_idx_list, valid_idx_list, test_idx_list = load_data(measure, setting, clu_thre, n_fold)
+        #dataset = list(zip(compounds, adjacencies, proteins, interactions))
+        dataset=[data_pack[0],data_pack[1],data_pack[7],data_pack[8]]  #dtype(d).to(device)
+        dataset=list(np.array(dataset).T)
+        for i in range(len(dataset)):
+            dataset[i][0]=torch.LongTensor(dataset[i][0]).to(device)
+            dataset[i][1]=torch.FloatTensor(dataset[i][1]).to(device)
+            dataset[i][2]=torch.LongTensor(dataset[i][2]).to(device)
+            dataset[i][3]=torch.FloatTensor([dataset[i][3]]).to(device)
+        
+        d_score_list = []
+        fold_score_list = []
+        for a_fold in range(n_fold):
+            print ('repeat', a_rep+1, 'fold', a_fold+1, 'begin')
+            train_idx, valid_idx, test_idx = train_idx_list[a_fold], valid_idx_list[a_fold], \
+                test_idx_list[a_fold]
+            print ('train num:', len(train_idx), 'valid num:', len(valid_idx), 'test num:', len(test_idx))
+			
+            train_data = datalist(dataset,train_idx)
+            valid_data = datalist(dataset,valid_idx)
+            test_data = datalist(dataset,test_idx)
+            #train_data = dataset[train_idx]
+            #valid_data = dataset[valid_idx]
+            #test_data = dataset[test_idx]
+			
+            start = timeit.default_timer()
+            for epoch in range(1, warmup_step):
+        
+                trainer.optimizer.param_groups[0]['lr'] += (lr-1e-7)/warmup_step
+                loss_train = (trainer.train(train_data))
+                rmse_value_dev, pearson_value_dev, spearman_value_dev,AUC_dev = tester.test(valid_data)
+                rmse_value, pearson_value, spearman_value,AUC = tester.test(test_data)
+                end = timeit.default_timer()
+                time = end - start
+                AUCs = [epoch, time, loss_train, AUC_dev,
+                        rmse_value_dev, pearson_value_dev, spearman_value_dev,AUC_dev,
+                        rmse_value, pearson_value, spearman_value,AUC]
+                tester.save_AUCs(AUCs, file_AUCs)
+                tester.save_model(model, file_model)
+                print(' '.join(map(str, AUCs)))
+        
+            for epoch in range(1, iteration):
 
+                if epoch % decay_interval == 0:
+                        trainer.optimizer.param_groups[0]['lr'] *= lr_decay
 
- 
+                loss_train = trainer.train(train_data)
+                rmse_value_dev, pearson_value_dev, spearman_value_dev,AUC_dev = tester.test(valid_data)
+                rmse_value, pearson_value, spearman_value,AUC = tester.test(test_data)
+                end = timeit.default_timer()
+                time = end - start
+                AUCs = [epoch, time, loss_train, AUC_dev,
+                        rmse_value_dev, pearson_value_dev, spearman_value_dev,AUC_dev,
+                        rmse_value, pearson_value, spearman_value,AUC]
+                tester.save_AUCs(AUCs, file_AUCs)
+                tester.save_model(model, file_model)
+
+                print(' '.join(map(str, AUCs)))
+                
+            test_performance = [rmse_value, pearson_value, spearman_value, AUC]
+            
+    		#test_performance, test_label, test_output 
+            
+            rep_all_list.append(test_performance)
+            fold_score_list.append(test_performance)
+            print ('-'*30)
+        print ('fold avg performance', np.mean(fold_score_list,axis=0))
+        rep_avg_list.append(np.mean(fold_score_list,axis=0))
+        np.save('MONN_rep_all_list_'+measure+'_'+setting+'_thre'+str(clu_thre), rep_all_list)
+    
+    
+    
+    
+    
+    '''
     for epoch in range(1, warmup_step):
         
         trainer.optimizer.param_groups[0]['lr'] += (lr-1e-7)/warmup_step
-        loss_train = trainer.train(dataset_train)
+        loss_train = (trainer.train(dataset_train))
         AUC_dev = tester.test(dataset_dev)[0]
         AUC_test, precision_test, recall_test = tester.test(dataset_test)
         end = timeit.default_timer()
@@ -545,3 +891,4 @@ if __name__ == "__main__":
         tester.save_model(model, file_model)
 
         print('\t'.join(map(str, AUCs)))
+'''
